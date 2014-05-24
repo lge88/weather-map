@@ -6,6 +6,20 @@ function Station(id, lat, lon, weight) {
   this.weight = parseInt(weight);
 }
 
+Station.prototype.getInfoHTML = function() {
+  var info = '<div id="content"><div id="siteNotice"></div>' +
+        '<h1 id="firstHeading" class="firstHeading">' + this.id + '</h1>' +
+        '<div id="bodyContent">' +
+        '<p>' +
+        '<b>lat</b>: ' + this.lat + '&nbsp&nbsp' +
+        '<b>lon</b>: ' + this.lon + '&nbsp&nbsp' +
+        '<b>weight</b>: ' + this.weight + '&nbsp&nbsp' +
+        '<b>node: </b>: ' + (this._node && this._node.id) +
+        '</p>' +
+        '</div></div>';
+  return info;
+};
+
 function PartionNode(id, coord, threshold) {
   this.id = id;
   this.coord = coord;
@@ -47,7 +61,9 @@ MarkerStyleGenerator.prototype.get = function(i) {
 function WeatherMapApp() {
 
   this.options = {};
-  this.options.stationsCSVFileUrl = 'data/stations-sampled-1-of-100.csv';
+  this.options.stationsCSVFileUrl = 'data/stations-sampled-1-of-20.csv';
+  this.options['sample ratio'] = '1-of-20';
+  // this.options.stationsCSVFileUrl = 'data/stations.csv';
   this.options.partitionTreeCSVFileUrl = 'data/partition-tree-yoav.csv';
   this.options.stationToNodeCSVFileUrl = 'data/station-to-node-yoav.csv';
   this.options.showStations = true;
@@ -55,11 +71,13 @@ function WeatherMapApp() {
   this.options.level = 4;
 
   this.stations = [];
+  this.nodes = [];
+
   this.markerStyleGenerator = new MarkerStyleGenerator();
 
   this.mapElement = document.getElementById('map');
   this.map = new google.maps.Map(this.mapElement, {
-    zoom: 2,
+    zoom: 3,
     center: new google.maps.LatLng(0, 0),
     mapTypeId: google.maps.MapTypeId.ROADMAP
   });
@@ -71,7 +89,7 @@ WeatherMapApp.prototype.update = function() {
 };
 
 WeatherMapApp.prototype.drawAll = function() {
-  this.drawStations();
+  if (this.options.showStations === true) { this.drawStations(); }
 };
 
 WeatherMapApp.prototype.clearAll = function() {
@@ -83,6 +101,22 @@ WeatherMapApp.prototype.clearStations = function() {
     var marker = s._marker;
     if (marker) { marker.setMap(null); }
     delete s._marker;
+  });
+};
+
+WeatherMapApp.prototype.loadAll = function(cb) {
+  var _this = this;
+  this.clearAll();
+  this.stations = [];
+  this.nodes = [];
+  this._nodes_map = {};
+  this.loadStations(function() {
+    _this.loadPartionTree(function() {
+      _this.loadStationToNode(function() {
+        _this.update();
+        if (typeof cb === 'function') { cb(); }
+      });
+    });
   });
 };
 
@@ -137,21 +171,22 @@ WeatherMapApp.prototype.loadStationToNode = function(cb) {
 WeatherMapApp.prototype.shuffleColors = function() {
   var indices = this.markerStyleGenerator.indices;
   this.markerStyleGenerator.indices = shuffle(indices);
+  this.update();
 };
 
 WeatherMapApp.prototype.drawStations = function() {
-  var stations = this.stations, map = this.map;
+  var _this = this, stations = this.stations, map = this.map;
   var markerGen = this.markerStyleGenerator;
   var level = this.options.level;
-  var showStationsWithUndefinedNode = this.showStationsWithUndefinedNode;
+  var showStationsWithUndefinedNode = this.options.showStationsWithUndefinedNode;
 
   var infowindow = new google.maps.InfoWindow();
+
   stations.forEach(function(station) {
     var node = station._node, nid = (node && node.getIntIdAtLevel(level)) || 0;
     if (!node && showStationsWithUndefinedNode === false) { return; }
 
     var markerStyle = markerGen.get(nid);
-
     var marker = station._marker = new google.maps.Marker({
       position: new google.maps.LatLng(station.lat, station.lon),
       map: map,
@@ -159,18 +194,7 @@ WeatherMapApp.prototype.drawStations = function() {
     });
 
     google.maps.event.addListener(marker, 'click', function() {
-
-      var info = '<div id="content"><div id="siteNotice"></div>' +
-            '<h1 id="firstHeading" class="firstHeading">' + station.id + '</h1>' +
-            '<div id="bodyContent">' +
-            '<p>' +
-            '<b>lat</b>: ' + station.lat + '&nbsp&nbsp' +
-            '<b>lon</b>: ' + station.lon + '&nbsp&nbsp' +
-            '<b>weight</b>: ' + station.weight + '&nbsp&nbsp' +
-            '<b>node: </b>: ' + (station._node && station._node.id) +
-            '</p>' +
-            '</div></div>';
-
+      var info = station.getInfoHTML();
       infowindow.setContent(info);
       infowindow.open(map, marker);
     });
@@ -182,10 +206,25 @@ WeatherMapApp.prototype.drawStations = function() {
 };
 
 var app = new WeatherMapApp();
-app.loadStations(function() {
-  app.loadPartionTree(function() {
-    app.loadStationToNode(function() {
-      app.update();
-    });
-  });
+app.loadAll();
+
+var gui = new dat.GUI();
+
+gui.add({ 'stations' : true }, 'stations').onChange(function(val) { app.options.showStations = val; app.update(); });
+gui.add(app.options, 'level', 0, 9).step(1).onChange(function() { app.update(); });
+gui.add(app.options, 'sample ratio', [
+  // always crashes without sampling
+  // '1-of-1',
+  '1-of-10',
+  '1-of-20',
+  '1-of-50',
+  '1-of-100'
+]).onChange(function() {
+  app.options.stationsCSVFileUrl = 'data/stations-sampled-' + app.options['sample ratio'] + '.csv';
+  app.loadAll();
 });
+gui.add({ 'shuffle colors': function() { app.shuffleColors(); } }, 'shuffle colors');
+// gui.add(app.options, 'showStationsWithUndefinedNode').onChange(function() { app.update(); });
+// gui.add(app.options, 'stationsCSVFileUrl').onChange(function() { app.loadAll(); });
+// gui.add(app.options, 'partitionTreeCSVFileUrl').onChange(function() { app.loadAll(); });
+// gui.add(app.options, 'stationToNodeCSVFileUrl').onChange(function() { app.loadAll(); });
