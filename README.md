@@ -3,8 +3,8 @@ GUI
 - Toggle stations visibility.
 - Choose the level to inspect. Level is a integer from 0 to 9. 0 means
   no partition. 9 is the finest partition.
-- Choose sample ratio. The portion of the whole stations file to view. Showing
-  all 85284 stations on google map makes it realy slow.
+- Choose sample ratio. The portion of the whole stations file to
+  view. Showing all 85284 stations on google map makes it realy slow.
 - Shuffle colors. Shuffle the color of markers randomly.
 
 Data File List
