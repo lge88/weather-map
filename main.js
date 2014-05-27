@@ -94,7 +94,7 @@ MarkerStyleGenerator.prototype.get = function(i) {
 function WeatherMapApp() {
 
   this.options = {};
-  this.options['sample ratio'] = '1-of-20';
+  this.options['sample ratio'] = '1-of-10';
   this.options.stationsCSVFileUrl = 'data/stations-lat-lon-weight-' +
     this.options['sample ratio'] + '.csv';
 
@@ -104,7 +104,7 @@ function WeatherMapApp() {
   this.options.showStations = true;
   this.options.showMerged = false;
   this.options.showStationsWithUndefinedNode = false;
-  this.options.level = 4;
+  this.options.level = 5;
 
   this.stations = [];
   this.nodes = [];
