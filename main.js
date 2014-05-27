@@ -6,7 +6,23 @@ function Station(id, lat, lon, weight) {
   this.weight = parseInt(weight);
 }
 
-Station.prototype.getInfoHTML = function() {
+Station.prototype.getInfoHTML = function(nodesMap, level) {
+  var nodeInfo = '';
+  if (this._node) {
+    var na = this._node.findAncestorAtLevel(nodesMap, level);
+    if (na) {
+      nodeInfo += '<b>node at level ' + level + ': </b>' + na.id + '&nbsp&nbsp';
+      nodeInfo += '<b>coord: </b>' + na.coord + '&nbsp&nbsp';
+      nodeInfo += '<b>threshold: </b>' + na.threshold + '</br>';
+      nodeInfo += '<b>k: </b>' + na.k + '&nbsp&nbsp';
+      nodeInfo += '<b>number of samples: </b>' + na.nsamples + '&nbsp&nbsp';
+      nodeInfo += '<b>descriptor length: </b>' + na.descriptorLength + '</br>';
+      nodeInfo += '<b>should be merged: </b>' + na.shouldBeMerged;
+    }
+  } else {
+    nodeInfo = '<b>node: </b>&nbsp&nbsp' + 'undefined';
+  }
+
   var info = '<div id="content"><div id="siteNotice"></div>' +
         '<h1 id="firstHeading" class="firstHeading">' + this.id + '</h1>' +
         '<div id="bodyContent">' +
@@ -14,17 +30,34 @@ Station.prototype.getInfoHTML = function() {
         '<b>lat</b>: ' + this.lat + '&nbsp&nbsp' +
         '<b>lon</b>: ' + this.lon + '&nbsp&nbsp' +
         '<b>weight</b>: ' + this.weight + '&nbsp&nbsp' +
-        '<b>node: </b>: ' + (this._node && this._node.id) +
+        '<b>leaf: </b>: ' + (this._node && this._node.id) +
+        '</p>' +
+        '<p>' +
+        nodeInfo +
         '</p>' +
         '</div></div>';
   return info;
 };
 
-function PartionNode(id, coord, threshold) {
-  this.id = id;
-  this.coord = coord;
-  this.threshold = parseFloat(threshold);
-}
+function PartionNode() {}
+
+PartionNode.prototype.setFromCSVLine = function(line) {
+  var arr = line.trim().split(',');
+  this.id = arr[0];
+  this.coord = arr[1];
+  this.threshold = parseFloat(arr[2]);
+  this.k = parseInt(arr[3]);
+  this.nsamples = parseInt(arr[4]);
+  this.descriptorLength = parseInt(arr[5]);
+  this.shouldBeMerged = arr[6] === '1' ? true : false;
+  return this;
+};
+
+PartionNode.prototype.findParent = function(nodesMap) { return nodesMap[this.id.slice(0, -1)]; };
+PartionNode.prototype.findAncestorAtLevel = function(nodesMap, level) { return nodesMap[this.id.slice(0, level)]; };
+PartionNode.prototype.findLeftChild = function(nodesMap) { return nodesMap[this.id + '0']; };
+PartionNode.prototype.findRightChild = function(nodesMap) { return nodesMap[this.id + '1']; };
+PartionNode.prototype.getIntId = function() { return parseInt(this.id, 2) + 1; };
 
 PartionNode.prototype.getIntIdAtLevel = function(level) {
   var id = this.id;
@@ -61,12 +94,15 @@ MarkerStyleGenerator.prototype.get = function(i) {
 function WeatherMapApp() {
 
   this.options = {};
-  this.options.stationsCSVFileUrl = 'data/stations-sampled-1-of-20.csv';
   this.options['sample ratio'] = '1-of-20';
-  // this.options.stationsCSVFileUrl = 'data/stations.csv';
-  this.options.partitionTreeCSVFileUrl = 'data/partition-tree-yoav.csv';
+  this.options.stationsCSVFileUrl = 'data/stations-lat-lon-weight-' +
+    this.options['sample ratio'] + '.csv';
+
+  this.options.partitionTreeCSVFileUrl = 'data/partition-tree-nid-coord-thres-k-n-dl-m-1-of-100.csv';
   this.options.stationToNodeCSVFileUrl = 'data/station-to-node-yoav.csv';
+
   this.options.showStations = true;
+  this.options.showMerged = false;
   this.options.showStationsWithUndefinedNode = false;
   this.options.level = 4;
 
@@ -78,7 +114,7 @@ function WeatherMapApp() {
   this.mapElement = document.getElementById('map');
   this.map = new google.maps.Map(this.mapElement, {
     zoom: 3,
-    center: new google.maps.LatLng(0, 0),
+    center: new google.maps.LatLng(40.0, -100.0),
     mapTypeId: google.maps.MapTypeId.ROADMAP
   });
 }
@@ -138,8 +174,10 @@ WeatherMapApp.prototype.loadPartionTree = function(cb) {
   this._nodes_map = {};
 
   getTextFileFromUrl(url, function(str) {
-    _this.nodes = csvToList(str).map(function(item) {
-      return new PartionNode(item[0], item[1], item[2]);
+    _this.nodes = str.trim().split('\n').map(function(line) {
+      var n = new PartionNode();
+      n.setFromCSVLine(line);
+      return n;
     });
     _this.nodes.forEach(function(n) { _this._nodes_map[n.id] = n; });
     if (typeof cb === 'function') { cb(_this.nodes); }
@@ -179,14 +217,31 @@ WeatherMapApp.prototype.drawStations = function() {
   var markerGen = this.markerStyleGenerator;
   var level = this.options.level;
   var showStationsWithUndefinedNode = this.options.showStationsWithUndefinedNode;
+  var showMerged = this.options.showMerged;
+  var nodesMap = this._nodes_map;
 
   var infowindow = new google.maps.InfoWindow();
 
   stations.forEach(function(station) {
-    var node = station._node, nid = (node && node.getIntIdAtLevel(level)) || 0;
-    if (!node && showStationsWithUndefinedNode === false) { return; }
+    var leaf = station._node;
+    if (!leaf && showStationsWithUndefinedNode === false) { return; }
 
+    // debugger;
+    var node = leaf ? leaf.findAncestorAtLevel(nodesMap, level) : nodesMap[''];
+
+    var nid = node.getIntId();
     var markerStyle = markerGen.get(nid);
+
+    // If show merged results, use the color of its parent's left child.
+    if (node && node.shouldBeMerged === true && showMerged === true) {
+      var np = node.findParent(nodesMap);
+      var lc = np && np.findLeftChild(nodesMap);
+      if (lc) {
+        nid = lc.getIntId();
+        markerStyle = markerGen.get(nid);
+      }
+    }
+
     var marker = station._marker = new google.maps.Marker({
       position: new google.maps.LatLng(station.lat, station.lon),
       map: map,
@@ -194,7 +249,7 @@ WeatherMapApp.prototype.drawStations = function() {
     });
 
     google.maps.event.addListener(marker, 'click', function() {
-      var info = station.getInfoHTML();
+      var info = station.getInfoHTML(nodesMap, level);
       infowindow.setContent(info);
       infowindow.open(map, marker);
     });
@@ -210,7 +265,8 @@ app.loadAll();
 
 var gui = new dat.GUI();
 
-gui.add({ 'stations' : true }, 'stations').onChange(function(val) { app.options.showStations = val; app.update(); });
+gui.add({ 'stations' : app.options.showStations }, 'stations').onChange(function(val) { app.options.showStations = val; app.update(); });
+gui.add({ 'merged' : app.options.showMerged }, 'merged').onChange(function(val) { app.options.showMerged = val; app.update(); });
 gui.add(app.options, 'level', 0, 9).step(1).onChange(function() { app.update(); });
 gui.add(app.options, 'sample ratio', [
   // always crashes without sampling
@@ -224,6 +280,8 @@ gui.add(app.options, 'sample ratio', [
   app.loadAll();
 });
 gui.add({ 'shuffle colors': function() { app.shuffleColors(); } }, 'shuffle colors');
+
+
 // gui.add(app.options, 'showStationsWithUndefinedNode').onChange(function() { app.update(); });
 // gui.add(app.options, 'stationsCSVFileUrl').onChange(function() { app.loadAll(); });
 // gui.add(app.options, 'partitionTreeCSVFileUrl').onChange(function() { app.loadAll(); });
