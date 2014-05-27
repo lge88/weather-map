@@ -276,7 +276,8 @@ gui.add(app.options, 'sample ratio', [
   '1-of-50',
   '1-of-100'
 ]).onChange(function() {
-  app.options.stationsCSVFileUrl = 'data/stations-sampled-' + app.options['sample ratio'] + '.csv';
+  app.options.stationsCSVFileUrl = 'data/stations-lat-lon-weight-' +
+    app.options['sample ratio'] + '.csv';
   app.loadAll();
 });
 gui.add({ 'shuffle colors': function() { app.shuffleColors(); } }, 'shuffle colors');
