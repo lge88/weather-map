@@ -17,7 +17,7 @@ Station.prototype.getInfoHTML = function(nodesMap, level) {
       nodeInfo += '<b>k: </b>' + na.k + '&nbsp&nbsp';
       nodeInfo += '<b>number of samples: </b>' + na.nsamples + '&nbsp&nbsp';
       nodeInfo += '<b>descriptor length: </b>' + na.descriptorLength + '</br>';
-      nodeInfo += '<b>should be merged: </b>' + na.shouldBeMerged;
+      nodeInfo += '<b>group: </b>' + na.group;
     }
   } else {
     nodeInfo = '<b>node: </b>&nbsp&nbsp' + 'undefined';
@@ -49,7 +49,8 @@ PartionNode.prototype.setFromCSVLine = function(line) {
   this.k = parseInt(arr[3]);
   this.nsamples = parseInt(arr[4]);
   this.descriptorLength = parseInt(arr[5]);
-  this.shouldBeMerged = arr[6] === '1' ? true : false;
+  // this.shouldBeMerged = arr[6] === '1' ? true : false;
+  this.group = parseInt(arr[6]);
   return this;
 };
 
@@ -98,7 +99,7 @@ function WeatherMapApp() {
   this.options.stationsCSVFileUrl = 'data/stations-lat-lon-weight-' +
     this.options['sample ratio'] + '.csv';
 
-  this.options.partitionTreeCSVFileUrl = 'data/partition-tree-nid-coord-thres-k-n-dl-m-1-of-100.csv';
+  this.options.partitionTreeCSVFileUrl = 'data/partition-tree-nid-coord-thres-k-n-dl-gid-1-of-100.csv';
   this.options.stationToNodeCSVFileUrl = 'data/station-to-node-yoav.csv';
 
   this.options.showStations = true;
@@ -229,18 +230,8 @@ WeatherMapApp.prototype.drawStations = function() {
     // debugger;
     var node = leaf ? leaf.findAncestorAtLevel(nodesMap, level) : nodesMap[''];
 
-    var nid = node.getIntId();
-    var markerStyle = markerGen.get(nid);
-
-    // If show merged results, use the color of its parent's left child.
-    if (node && node.shouldBeMerged === true && showMerged === true) {
-      var np = node.findParent(nodesMap);
-      var lc = np && np.findLeftChild(nodesMap);
-      if (lc) {
-        nid = lc.getIntId();
-        markerStyle = markerGen.get(nid);
-      }
-    }
+    var group = node.group;
+    var markerStyle = markerGen.get(group);
 
     var marker = station._marker = new google.maps.Marker({
       position: new google.maps.LatLng(station.lat, station.lon),

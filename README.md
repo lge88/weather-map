@@ -32,13 +32,13 @@ node-id can be an empty string (root node) or string of only '0's and
 
 partition-tree*.csv
 -------------------
-node-id,coord,threshold,k,n,dl,m
+node-id,coord,threshold,k,n,dl,gid
 
 - coord is partitioned coordinate type, it is either 'lat' (latitude) or 'lon' (longitude).
 - k is the number of eigenvectors.
-- n is the number of samples
-- dl is the descriptor length calculated using: dl = n * k + (k + 1) * 730
-- m is a flag indicates whether the node should merged. '0' means no, '1' means yes.
+- n is the number of samples.
+- dl is the descriptor length calculated using: dl = n * k + (k + 1) * 730.
+- gid is a integer of the group that the node belongs to.
 
 node-descriptor-length.csv
 --------------------------
