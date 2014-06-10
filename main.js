@@ -1,4 +1,6 @@
 
+var randomColor = window.randomColor;
+
 function Station(id, lat, lon, weight) {
   this.id = id;
   this.lat = parseFloat(lat);
@@ -68,28 +70,44 @@ PartionNode.prototype.getIntIdAtLevel = function(level) {
   return parseInt(id, 2) + 1;
 };
 
-function MarkerStyleGenerator() {
-  this.colors = [
-    'blue',
-    'brown',
-    'darkgreen',
-    'green',
-    'orange',
-    'paleblue',
-    'pink',
-    'purple',
-    'red',
-    'yellow'
-  ];
-  this.letters = 'ABCDEFGHIJKLMNOPQRSTUVWXYZ'.split('');
-  this.indices = shuffle(range(260));
+function MarkerStyleGenerator(numColors) {
+  if (!numColors) { numColors = 100; }
+  this.colors = randomColor({ count: numColors });
 }
 
 MarkerStyleGenerator.prototype.get = function(i) {
-  var indx = this.indices[i % 260];
-  var cIndx = indx % 10, lIndx = Math.floor(indx / 10);
-  var color = this.colors[cIndx], letter = this.letters[lIndx];
-  return color + '_Marker' + letter;
+  var len = this.colors.length;
+  var indx = Math.round(i) % len;
+  if (indx < 0) { indx += len; }
+  return this.colors[indx];
+};
+
+MarkerStyleGenerator.prototype.shuffle = function() {
+  this.colors = shuffle(this.colors);
+};
+
+function HeatMapColorGenerator(groups) {
+  this.colorMap = {};
+  this.shuffle(groups);
+}
+
+HeatMapColorGenerator.prototype.get = function(i) {
+  return this.colorMap[i] || 0.5;
+};
+
+HeatMapColorGenerator.prototype.shuffle = function(groups) {
+  var len = groups.length;
+  var cm = this.colorMap;
+  if (len <= 1) { return; }
+
+  var ds = 1.0 / (len - 1);
+  var scalars = [], i = 0;
+  for (; i < len + 1; ++i) { scalars.push(ds * i); }
+  scalars = shuffle(scalars);
+
+  groups.forEach(function(gid, i) {
+    cm[gid] = scalars[i]
+  });
 };
 
 function WeatherMapApp() {
@@ -101,8 +119,13 @@ function WeatherMapApp() {
 
   this.options.partitionTreeCSVFileUrl = 'data/partition-tree-nid-coord-thres-k-n-dl-gid-1-of-100.csv';
   this.options.stationToNodeCSVFileUrl = 'data/station-to-node-yoav.csv';
+  this.options.stationGroupCSVFileUrls = [
+    'data/station-group-before-merge.csv',
+    'data/station-group-after-merge.csv'
+  ];
 
-  this.options.showStations = true;
+  this.options.showStationMarkers = true;
+  this.options.showStationHeatMap = false;
   this.options.showMerged = false;
   this.options.showStationsWithUndefinedNode = false;
   this.options.level = 5;
@@ -111,6 +134,7 @@ function WeatherMapApp() {
   this.nodes = [];
 
   this.markerStyleGenerator = new MarkerStyleGenerator();
+  this.heatMapColorGenerator = null;
 
   this.mapElement = document.getElementById('map');
   this.map = new google.maps.Map(this.mapElement, {
@@ -126,19 +150,25 @@ WeatherMapApp.prototype.update = function() {
 };
 
 WeatherMapApp.prototype.drawAll = function() {
-  if (this.options.showStations === true) { this.drawStations(); }
+  if (this.options.showStationMarkers === true) { this.drawStationMarkers(); }
+  if (this.options.showStationHeatMap === true) { this.drawStationHeatMap(); }
 };
 
 WeatherMapApp.prototype.clearAll = function() {
-  this.clearStations();
+  this.clearStationMarkers();
+  this.clearStationHeatMap();
 };
 
-WeatherMapApp.prototype.clearStations = function() {
+WeatherMapApp.prototype.clearStationMarkers = function() {
   this.stations.forEach(function(s) {
     var marker = s._marker;
     if (marker) { marker.setMap(null); }
     delete s._marker;
   });
+};
+
+WeatherMapApp.prototype.clearStationHeatMap = function() {
+  if (this.heatMap) { this.heatMap.setMap(null); }
 };
 
 WeatherMapApp.prototype.loadAll = function(cb) {
@@ -150,8 +180,9 @@ WeatherMapApp.prototype.loadAll = function(cb) {
   this.loadStations(function() {
     _this.loadPartionTree(function() {
       _this.loadStationToNode(function() {
-        _this.update();
-        if (typeof cb === 'function') { cb(); }
+        _this.loadStationGroups(function() {
+          if (typeof cb === 'function') { cb(); }
+        });
       });
     });
   });
@@ -181,6 +212,10 @@ WeatherMapApp.prototype.loadPartionTree = function(cb) {
       return n;
     });
     _this.nodes.forEach(function(n) { _this._nodes_map[n.id] = n; });
+
+    var groups = _this.nodes.map(function(n) { return n.group; });
+    _this.heatMapColorGenerator = new HeatMapColorGenerator(groups);
+
     if (typeof cb === 'function') { cb(_this.nodes); }
   });
 };
@@ -207,37 +242,81 @@ WeatherMapApp.prototype.loadStationToNode = function(cb) {
   });
 };
 
+
+WeatherMapApp.prototype.loadStationGroups = function(cb) {
+  var stations = this.stations, nodes = this.nodes;
+
+  var stationMap = stations.reduce(function(sofar, item) {
+    sofar[item.id] = item;
+    return sofar;
+  }, {});
+
+  var u1 = this.options.stationGroupCSVFileUrls[0];
+  var u2 = this.options.stationGroupCSVFileUrls[1];
+  var ok = 0;
+  [
+    { url: u1, field: 'groupBeforeMerge' },
+    { url: u2, field: 'groupAfterMerge' },
+  ].forEach(function(obj) {
+    var url = obj.url, field = obj.field;
+    getTextFileFromUrl(url, function(txt) {
+      txt.trim().split('\n').forEach(function(line) {
+        var arr = line.trim().split(',');
+        stationId = arr[0];
+        groupId = parseInt(arr[1]);
+        if (isNaN(groupId)) { groupId = 0; }
+        var station = stationMap[stationId];
+        if (station) { station[field] = groupId; }
+      });
+      ++ok;
+      done();
+    });
+  });
+
+  function done() { if (ok == 2 && typeof cb === 'function') { cb(); } }
+
+};
+
+
 WeatherMapApp.prototype.shuffleColors = function() {
-  var indices = this.markerStyleGenerator.indices;
-  this.markerStyleGenerator.indices = shuffle(indices);
+  this.markerStyleGenerator.shuffle();
   this.update();
 };
 
-WeatherMapApp.prototype.drawStations = function() {
+WeatherMapApp.prototype.drawStationMarkers = function() {
   var _this = this, stations = this.stations, map = this.map;
   var markerGen = this.markerStyleGenerator;
   var level = this.options.level;
   var showStationsWithUndefinedNode = this.options.showStationsWithUndefinedNode;
   var showMerged = this.options.showMerged;
   var nodesMap = this._nodes_map;
+  var markerRadius = 50000;
 
   var infowindow = new google.maps.InfoWindow();
-
   stations.forEach(function(station) {
     var leaf = station._node;
     if (!leaf && showStationsWithUndefinedNode === false) { return; }
-
-    // debugger;
     var node = leaf ? leaf.findAncestorAtLevel(nodesMap, level) : nodesMap[''];
-
     var group = node.group;
+
+    // var group = _this.options.showMerged ?
+    //   station.groupAfterMerge : station.groupBeforeMerge;
     var markerStyle = markerGen.get(group);
 
-    var marker = station._marker = new google.maps.Marker({
-      position: new google.maps.LatLng(station.lat, station.lon),
+    var marker = station._marker = new google.maps.Circle({
       map: map,
-      icon: 'resource/markers/' + markerStyle + '.png'
+      center: new google.maps.LatLng(station.lat, station.lon),
+      position: new google.maps.LatLng(station.lat, station.lon),
+      radius: markerRadius,
+      strokeWeight: 0,
+      fillColor: markerStyle
     });
+
+    // var marker = station._marker = new google.maps.Marker({
+    //   position: new google.maps.LatLng(station.lat, station.lon),
+    //   map: map,
+    //   icon: 'resource/markers/' + markerStyle + '.png'
+    // });
 
     google.maps.event.addListener(marker, 'click', function() {
       var info = station.getInfoHTML(nodesMap, level);
@@ -251,12 +330,39 @@ WeatherMapApp.prototype.drawStations = function() {
   });
 };
 
+WeatherMapApp.prototype.drawStationHeatMap = function() {
+  var _this = this, stations = this.stations, map = this.map;
+  var colorGen = this.heatMapColorGenerator;
+  var nodesMap = this._nodes_map;
+
+  var data = stations.map(function(station) {
+    var node = station._node || nodesMap[''];
+    var res = {};
+    res.location = new google.maps.LatLng(station.lat, station.lon);
+    // res.weight = colorGen.get(node.group);
+    res.weight = node.weight;
+    return res;
+  });
+
+
+  this.heatMap = new google.maps.visualization.HeatmapLayer({
+    data: data,
+    radius: 20
+  });
+
+  this.heatMap.setMap(map);
+};
+
+
 var app = new WeatherMapApp();
-app.loadAll();
+app.loadAll(function() {
+  console.log('Loading finished!');
+  app.update();
+});
 
 var gui = new dat.GUI();
 
-gui.add({ 'stations' : app.options.showStations }, 'stations').onChange(function(val) { app.options.showStations = val; app.update(); });
+gui.add({ 'stations' : app.options.showStationMarkers }, 'stations').onChange(function(val) { app.options.showStations = val; app.update(); });
 gui.add({ 'merged' : app.options.showMerged }, 'merged').onChange(function(val) { app.options.showMerged = val; app.update(); });
 gui.add(app.options, 'level', 0, 9).step(1).onChange(function() { app.update(); });
 gui.add(app.options, 'sample ratio', [
