@@ -1,11 +1,9 @@
 
 function getTextFileFromUrl(url, cb) {
   var req = new XMLHttpRequest();
-  var buf = [];
   req.open('GET', url);
   req.onreadystatechange = function() {
-    if (req.readyState === 3) { buf.push(req.responseText); }
-    if (req.readyState === 4) { cb(buf.join('')); }
+    if (req.readyState === 4) { cb(req.responseText); }
   };
   req.send();
 }
